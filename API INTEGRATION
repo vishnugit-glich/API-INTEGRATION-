@@ -1,0 +1,180 @@
+import requests
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from datetime import datetime
+
+# --- Configuration ---
+API_KEY = "YOUR_OPENWEATHERMAP_API_KEY" # Replace with your actual API key
+CITY_NAME = "Chennai" # You can change this city
+
+# Base URLs for OpenWeatherMap API
+CURRENT_WEATHER_URL = "http://api.openweathermap.org/data/2.5/weather"
+FORECAST_URL = "http://api.openweathermap.org/data/2.5/forecast"
+
+# --- 1. Fetch Current Weather Data ---
+def get_current_weather(city, api_key):
+    """Fetches current weather data for a given city."""
+    params = {
+        "q": city,
+        "appid": api_key,
+        "units": "metric" # Get temperature in Celsius
+    }
+    response = requests.get(CURRENT_WEATHER_URL, params=params)
+    response.raise_for_status() # Raise an exception for HTTP errors
+    return response.json()
+
+# --- 2. Fetch 5-day / 3-hour Forecast Data ---
+def get_weather_forecast(city, api_key):
+    """Fetches 5-day / 3-hour weather forecast data for a given city."""
+    params = {
+        "q": city,
+        "appid": api_key,
+        "units": "metric" # Get temperature in Celsius
+    }
+    response = requests.get(FORECAST_URL, params=params)
+    response.raise_for_status() # Raise an exception for HTTP errors
+    return response.json()
+
+# --- 3. Process Data ---
+def process_current_weather(data):
+    """Processes current weather JSON into a readable format."""
+    if data["cod"] != 200:
+        return None
+
+    main_data = data["main"]
+    weather_desc = data["weather"][0]["description"]
+    wind_data = data["wind"]
+
+    current_weather = {
+        "City": data["name"],
+        "Temperature (°C)": main_data["temp"],
+        "Feels Like (°C)": main_data["feels_like"],
+        "Humidity (%)": main_data["humidity"],
+        "Pressure (hPa)": main_data["pressure"],
+        "Wind Speed (m/s)": wind_data["speed"],
+        "Description": weather_desc.capitalize(),
+        "Timestamp": datetime.fromtimestamp(data["dt"]).strftime('%Y-%m-%d %H:%M:%S')
+    }
+    return current_weather
+
+def process_forecast_data(data):
+    """Processes forecast JSON into a Pandas DataFrame."""
+    if data["cod"] != "200":
+        return pd.DataFrame()
+
+    forecast_list = []
+    for item in data["list"]:
+        timestamp = datetime.fromtimestamp(item["dt"])
+        forecast_list.append({
+            "Timestamp": timestamp,
+            "Date": timestamp.date(),
+            "Hour": timestamp.hour,
+            "Temperature (°C)": item["main"]["temp"],
+            "Feels Like (°C)": item["main"]["feels_like"],
+            "Humidity (%)": item["main"]["humidity"],
+            "Pressure (hPa)": item["main"]["pressure"],
+            "Wind Speed (m/s)": item["wind"]["speed"],
+            "Description": item["weather"][0]["description"].capitalize()
+        })
+    return pd.DataFrame(forecast_list)
+
+# --- 4. Create Visualizations ---
+def create_weather_dashboard(current_weather, forecast_df, city_name):
+    """Generates a visualization dashboard using Matplotlib and Seaborn."""
+
+    fig, axes = plt.subplots(3, 1, figsize=(12, 18))
+    fig.suptitle(f"Weather Dashboard for {city_name}", fontsize=18, fontweight='bold')
+    plt.subplots_adjust(hspace=0.5)
+
+    # --- Plot 1: Current Weather Metrics ---
+    if current_weather:
+        metrics = {
+            "Temperature (°C)": current_weather["Temperature (°C)"],
+            "Feels Like (°C)": current_weather["Feels Like (°C)"],
+            "Humidity (%)": current_weather["Humidity (%)"],
+            "Pressure (hPa)": current_weather["Pressure (hPa)"],
+            "Wind Speed (m/s)": current_weather["Wind Speed (m/s)"]
+        }
+        metric_names = list(metrics.keys())
+        metric_values = list(metrics.values())
+
+        # Bar plot for current weather metrics
+        sns.barplot(x=metric_names, y=metric_values, ax=axes[0], palette="viridis")
+        axes[0].set_title(f"Current Weather in {city_name} ({current_weather['Timestamp']})", fontsize=14)
+        axes[0].set_ylabel("Value", fontsize=12)
+        axes[0].tick_params(axis='x', rotation=20)
+        for i, v in enumerate(metric_values):
+            axes[0].text(i, v + 0.5, f"{v:.1f}", color='black', ha='center', fontsize=10)
+        axes[0].text(0.5, 0.95, f"Description: {current_weather['Description']}",
+                     horizontalalignment='center', verticalalignment='top',
+                     transform=axes[0].transAxes, fontsize=12,
+                     bbox=dict(boxstyle="round,pad=0.3", fc="yellow", ec="b", lw=1, alpha=0.5))
+    else:
+        axes[0].set_title("Could not retrieve current weather data.", fontsize=14)
+        axes[0].set_visible(False) # Hide the subplot if no data
+
+
+    # --- Plot 2: Temperature Forecast ---
+    if not forecast_df.empty:
+        sns.lineplot(x="Timestamp", y="Temperature (°C)", data=forecast_df, marker="o", ax=axes[1], color="red")
+        axes[1].set_title(f"5-Day Temperature Forecast for {city_name}", fontsize=14)
+        axes[1].set_xlabel("Date and Time", fontsize=12)
+        axes[1].set_ylabel("Temperature (°C)", fontsize=12)
+        axes[1].tick_params(axis='x', rotation=45)
+        axes[1].grid(True, linestyle='--', alpha=0.7)
+    else:
+        axes[1].set_title("Could not retrieve forecast data.", fontsize=14)
+        axes[1].set_visible(False)
+
+    # --- Plot 3: Humidity and Wind Speed Forecast ---
+    if not forecast_df.empty:
+        # Create a twin Y-axis for wind speed
+        ax2 = axes[2].twinx()
+        sns.lineplot(x="Timestamp", y="Humidity (%)", data=forecast_df, marker="x", ax=axes[2], color="blue", label="Humidity")
+        sns.lineplot(x="Timestamp", y="Wind Speed (m/s)", data=forecast_df, marker="s", ax=ax2, color="green", label="Wind Speed")
+
+        axes[2].set_title(f"5-Day Humidity and Wind Speed Forecast for {city_name}", fontsize=14)
+        axes[2].set_xlabel("Date and Time", fontsize=12)
+        axes[2].set_ylabel("Humidity (%)", color="blue", fontsize=12)
+        ax2.set_ylabel("Wind Speed (m/s)", color="green", fontsize=12)
+
+        axes[2].tick_params(axis='x', rotation=45)
+        axes[2].grid(True, linestyle='--', alpha=0.7)
+        fig.legend(loc='upper right', bbox_to_anchor=(0.9, 0.8)) # Adjust legend position
+    else:
+        axes[2].set_title("Could not retrieve forecast data.", fontsize=14)
+        axes[2].set_visible(False)
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.96]) # Adjust layout to prevent title overlap
+    plt.show()
+
+# --- Main Execution ---
+if __name__ == "__main__":
+    print(f"Fetching weather data for {CITY_NAME}...")
+    try:
+        current_weather_data = get_current_weather(CITY_NAME, API_KEY)
+        processed_current_weather = process_current_weather(current_weather_data)
+        if processed_current_weather:
+            print("\n--- Current Weather ---")
+            for key, value in processed_current_weather.items():
+                print(f"{key}: {value}")
+        else:
+            print("Failed to retrieve current weather data.")
+
+        forecast_raw_data = get_weather_forecast(CITY_NAME, API_KEY)
+        forecast_df = process_forecast_data(forecast_raw_data)
+
+        if not forecast_df.empty:
+            print("\n--- 5-Day Forecast (first 5 entries) ---")
+            print(forecast_df.head())
+        else:
+            print("Failed to retrieve forecast data.")
+
+        # Generate and display the dashboard
+        create_weather_dashboard(processed_current_weather, forecast_df, CITY_NAME)
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data: {e}. Please check your internet connection or API key.")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
